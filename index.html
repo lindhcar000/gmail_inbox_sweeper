@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inbox Sweep — clean out your Gmail</title>
+<meta name="description" content="Find and trash marketing email, social media and website notifications, and old unread mail in Gmail. Runs entirely in your browser.">
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a65; --line: #e4e2db;
+    --accent: #1f6f5c; --accent-ink: #ffffff; --danger: #b3261e; --soft: #eef4f1; --warn: #fff6e0;
+    --radius: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151614; --panel: #1e1f1d; --ink: #ecebe6; --muted: #a3a29b; --line: #33342f;
+            --accent: #5fbf9f; --accent-ink: #0d1411; --danger: #ff8a80; --soft: #1f2a26; --warn: #2d2716; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 12px; }
+  .logo { font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .logo span { color: var(--accent); }
+  .who { color: var(--muted); font-size: 14px; }
+  main { padding: 28px 0 60px; }
+  h1 { font-size: 32px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 10px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  p.lead { color: var(--muted); max-width: 640px; margin: 0 0 22px; font-size: 16px; }
+  .grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+  .card + .card { margin-top: 16px; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  button.danger { background: var(--danger); color: #fff; border-color: var(--danger); font-weight: 600; }
+  button.small { padding: 3px 9px; font-size: 13px; }
+  button.link { border: none; background: none; color: var(--accent); padding: 0; }
+  .rule { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-top: 1px solid var(--line); }
+  .rule:first-of-type { border-top: none; }
+  .rule input { margin-top: 4px; accent-color: var(--accent); }
+  .rule b { display: block; font-weight: 600; }
+  .rule small { color: var(--muted); }
+  label.field { display: block; margin-top: 14px; font-weight: 600; font-size: 14px; }
+  label.field small { display: block; font-weight: 400; color: var(--muted); }
+  textarea, input[type=number], input[type=text], input[type=search] {
+    width: 100%; font: 13px/1.4 ui-monospace, Menlo, monospace; padding: 8px; margin-top: 6px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); }
+  textarea { min-height: 84px; resize: vertical; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .protect { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .notice { background: var(--warn); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-bottom: 14px; }
+  .progress { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; margin: 10px 0 4px; }
+  .progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .status { color: var(--muted); font-size: 14px; min-height: 21px; }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 14px; }
+  @media (max-width: 600px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--soft); border-radius: 10px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  .toolbar input[type=search] { width: 180px; margin: 0; font-family: inherit; }
+  td button { white-space: nowrap; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .spacer { flex: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-top: none; }
+  td.from { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.subj { max-width: 340px; }
+  td.subj div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.reason { color: var(--muted); font-size: 13px; }
+  td.date { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+  tr.trashed td { opacity: .45; text-decoration: line-through; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--soft); color: var(--accent); margin-right: 4px; }
+  .tablewrap { max-height: 620px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  footer { color: var(--muted); font-size: 13px; padding: 20px 0 40px; }
+  footer a { color: var(--muted); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap bar">
+    <div class="logo">Inbox <span>Sweep</span></div>
+    <div>
+      <span class="who" id="who"></span>
+      <button id="signin" class="primary">Sign in with Google</button>
+      <button id="signout" class="hidden">Sign out</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <h1>Clear the clutter out of Gmail.</h1>
+  <p class="lead">Finds marketing email, social media and website notifications, and mail you never opened, then lets you review everything before it goes to Trash. It runs entirely in your browser: your email never touches our servers.</p>
+
+  <div id="setupNotice" class="notice hidden">
+    This site hasn't been connected to Google yet. Add a Client ID to <code>config.js</code>, or paste one under <b>Advanced</b> in the settings.
+  </div>
+
+  <div class="grid">
+    <!-- ---------------------------------------------------------------- settings -->
+    <aside>
+      <div class="card">
+        <h2>What to clean up</h2>
+        <label class="rule"><input type="checkbox" id="r-marketing"><span><b>Marketing &amp; promotions</b><small>Sales, newsletters, anything with promo signals</small></span></label>
+        <label class="rule"><input type="checkbox" id="r-social"><span><b>Social media notifications</b><small>Facebook, Instagram, X, TikTok, LinkedIn, Reddit…</small></span></label>
+        <label class="rule"><input type="checkbox" id="r-notifications"><span><b>Website notifications</b><small>Automated alerts from apps and sites</small></span></label>
+        <label class="rule"><input type="checkbox" id="r-oldUnread"><span><b>Unopened for over a year</b><small>Mail you never opened, older than 12 months</small></span></label>
+
+        <label class="field">Marketing strictness: <span id="thresholdLabel"></span>
+          <small>Lower catches more; higher only removes obvious promotions.</small>
+          <input type="range" id="threshold" min="2" max="6" step="1">
+        </label>
+
+        <label class="field">Keep list
+          <small>Senders or domains to never delete, one per line (e.g. <code>uw.edu</code>, <code>alerts@mybank.com</code>).</small>
+          <textarea id="allowlist" spellcheck="false"></textarea>
+        </label>
+
+        <label class="field">Extra social sites
+          <small>Domains to treat as social media, one per line.</small>
+          <textarea id="extraSocial" spellcheck="false" placeholder="mycommunity.app"></textarea>
+        </label>
+
+        <details>
+          <summary>Advanced</summary>
+          <label class="field">Max emails to scan per rule
+            <input type="number" id="maxPerRule" min="50" max="20000" step="50">
+          </label>
+          <label class="field">Google Client ID override
+            <small>Only if you host your own copy and haven't edited config.js.</small>
+            <input type="text" id="clientId" spellcheck="false">
+          </label>
+          <p><button class="link" id="resetSettings">Reset settings to defaults</button></p>
+        </details>
+      </div>
+
+      <div class="card">
+        <h2>Always kept, no matter what</h2>
+        <ul class="protect">
+          <li>Any conversation you replied to</li>
+          <li>Personal email sent only to you</li>
+          <li>Starred email</li>
+          <li>Receipts, bills, statements, security alerts</li>
+          <li>Job-application updates</li>
+          <li>Everyone on your keep list</li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- ---------------------------------------------------------------- results -->
+    <section class="card">
+      <div class="toolbar">
+        <button id="scan" class="primary" disabled>Scan my inbox</button>
+        <button id="stop" class="hidden">Stop</button>
+        <span class="spacer"></span>
+        <button id="export" class="hidden">Download CSV</button>
+      </div>
+      <div class="progress"><div id="progressBar"></div></div>
+      <div class="status" id="status">Sign in to get started.</div>
+
+      <div id="results" class="hidden" style="margin-top:14px">
+        <div class="stats" id="stats"></div>
+        <div class="toolbar">
+          <div class="tabs">
+            <button data-tab="DELETE" class="on">To trash</button>
+            <button data-tab="KEEP">Kept</button>
+            <button data-tab="TRASHED">Trashed</button>
+          </div>
+          <input type="search" id="filter" placeholder="Filter by sender or subject">
+          <span class="spacer"></span>
+          <button id="selAll" class="small">Select all</button>
+          <button id="selNone" class="small">Select none</button>
+        </div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th style="width:28px"></th><th>From</th><th>Subject</th><th>Why</th><th>Date</th><th></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+          <div id="empty" class="empty hidden">Nothing here.</div>
+        </div>
+        <div class="toolbar" style="margin-top:14px">
+          <span class="status" id="selCount"></span>
+          <span class="spacer"></span>
+          <button id="trash" class="danger" disabled>Move selected to Trash</button>
+        </div>
+        <p class="status">Trashed email can be recovered from Gmail's Trash for 30 days.</p>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="wrap">
+  Inbox Sweep runs in your browser and talks directly to Gmail. No email content is sent to or stored on any other server.
+  · <a href="privacy.html">Privacy policy</a>
+</footer>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="config.js"></script>
+<script src="rules.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
