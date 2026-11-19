@@ -25,8 +25,12 @@
     extraSocial: "",
     maxPerRule: 2000,
     clientId: "",
+    oldMonths: 12, // slider value: delete unopened mail older than this many months
+    oldDate: "",   // exact cutoff date (YYYY-MM-DD) from the date picker; overrides oldMonths
   };
-  const STRICTNESS = { 2: "Aggressive", 3: "Balanced", 4: "Careful", 5: "Very careful", 6: "Only obvious ads" };
+  // Slider stops, in months. Finer steps for recent dates, wider for older ones.
+  const OLD_STEPS = [1, 2, 3, 6, 9, 12, 18, 24, 36, 48, 60, 84, 120];
+  const STRICTNESS ={ 2: "Aggressive", 3: "Balanced", 4: "Careful", 5: "Very careful", 6: "Only obvious ads" };
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -67,6 +71,26 @@
       el.value = s[key];
       el.addEventListener("input", () => { s[key] = el.value; changed(key === "allowlist"); });
     }
+    // --- "unopened before" date slider + exact date picker
+    const slider = $("oldSlider"), picker = $("oldDate");
+    slider.max = OLD_STEPS.length - 1;
+    slider.value = nearestStep(s.oldMonths);
+    picker.max = isoDate(Date.now());
+    slider.addEventListener("input", () => {
+      s.oldMonths = OLD_STEPS[slider.value];
+      s.oldDate = "";
+      showOldCutoff(); changed();
+    });
+    picker.addEventListener("change", () => {
+      const v = picker.value;
+      if (!v || new Date(v + "T00:00:00").getTime() > Date.now()) { showOldCutoff(); return; }
+      s.oldDate = v;
+      slider.value = nearestStep(monthsAgo(new Date(v + "T00:00:00").getTime()));
+      showOldCutoff(); changed();
+    });
+    $("r-oldUnread").addEventListener("change", showOldCutoff);
+    showOldCutoff();
+
     const mx = $("maxPerRule");
     mx.value = s.maxPerRule;
     mx.addEventListener("input", () => { s.maxPerRule = Math.max(50, Number(mx.value) || DEFAULTS.maxPerRule); changed(); });
@@ -85,6 +109,42 @@
       if (isAllowlist) applyAllowlist();
       else setStatus("Settings changed. Scan again to apply them.");
     }
+  }
+
+  // ------------------------------------------------- unopened-mail cutoff --
+
+  function isoDate(ms) {
+    const d = new Date(ms);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function monthsAgo(ms) { return (Date.now() - ms) / (30.44 * 864e5); }
+  function nearestStep(months) {
+    let best = 0;
+    OLD_STEPS.forEach((m, i) => { if (Math.abs(m - months) < Math.abs(OLD_STEPS[best] - months)) best = i; });
+    return best;
+  }
+  function ageLabel(months) {
+    if (months < 12) return months + (months === 1 ? " month" : " months");
+    const y = months / 12;
+    return (Number.isInteger(y) ? y : y.toFixed(1)) + (y === 1 ? " year" : " years");
+  }
+
+  /** The cutoff as epoch ms: unopened mail received before this is flagged. */
+  function oldCutoffMs() {
+    const s = state.settings;
+    if (s.oldDate) return new Date(s.oldDate + "T00:00:00").getTime();
+    const d = new Date();
+    d.setMonth(d.getMonth() - (Number(s.oldMonths) || 12));
+    d.setHours(0, 0, 0, 0);
+    return d.getTime();
+  }
+
+  function showOldCutoff() {
+    const s = state.settings, cutoff = oldCutoffMs();
+    $("oldLabel").textContent = Rules.formatDate(cutoff);
+    $("oldAgo").textContent = s.oldDate ? "exact date" : ageLabel(Number(s.oldMonths) || 12) + " ago";
+    $("oldDate").value = isoDate(cutoff);
+    $("oldBlock").classList.toggle("off", !$("r-oldUnread").checked);
   }
 
   function allowlist() { return Rules.cleanList(state.settings.allowlist.split("\n")); }
@@ -250,7 +310,12 @@
     const s = state.settings;
     const base = "-is:starred -in:sent -in:chats";
     const q = [];
-    if (s.rules.oldUnread) q.push("older_than:1y is:unread " + base);
+    if (s.rules.oldUnread) {
+      // One day of slack: Gmail's before: works in whole days and its own time zone.
+      // The exact cutoff is enforced per email by the rules.
+      const d = new Date(oldCutoffMs() + 864e5);
+      q.push("is:unread before:" + d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate() + " " + base);
+    }
     if (s.rules.marketing) q.push("(category:promotions OR unsubscribe) " + base);
     if (s.rules.social) q.push("(category:social OR from:(" + socialDomains().join(" OR ") + ")) " + base);
     // "unsubscribe" is already covered by the marketing search when that rule is on.
@@ -291,6 +356,7 @@
         me: state.me,
         nowMs: Date.now(),
         threshold: state.settings.threshold,
+        oldBeforeMs: oldCutoffMs(),
         rules: state.settings.rules,
         // A getter, so "Always keep" clicks made mid-scan apply to emails still coming in.
         get allowlist() { return allowlist(); },
