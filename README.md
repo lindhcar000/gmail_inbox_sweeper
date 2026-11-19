@@ -51,7 +51,8 @@ python3 -m http.server 8000
 Then open http://localhost:8000. Opening `index.html` directly as a file won't work, because Google sign-in needs a web address.
 
 ## What users can customize
-- Turn each rule on or off: marketing, social media, website notifications, and unopened for over a year
+- Turn each rule on or off: marketing, social media, website notifications, and unopened old mail
+- Choose how old unopened mail must be before it's deleted: a slider from 1 month to 10 years (default 1 year), or an exact date
 - Marketing strictness, from Aggressive to "Only obvious ads"
 - A keep list of senders or domains that are never deleted
 - Extra social media domains
