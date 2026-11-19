@@ -43,6 +43,15 @@
   .rule input { margin-top: 4px; accent-color: var(--accent); }
   .rule b { display: block; font-weight: 600; }
   .rule small { color: var(--muted); }
+  .dateRule { margin: 0 0 4px 26px; padding: 10px 12px; background: var(--soft); border-radius: 10px; font-size: 14px; }
+  .dateRule.off { opacity: .45; pointer-events: none; }
+  .dateHead span, .dateHead small, .ends, .exact { color: var(--muted); }
+  .dateHead span { display: block; font-size: 12px; }
+  .dateHead b { font-size: 16px; }
+  .dateHead small { font-size: 12px; margin-left: 4px; }
+  .ends { display: flex; justify-content: space-between; font-size: 12px; margin-top: -2px; }
+  .exact { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 13px; white-space: nowrap; }
+  .exact input { width: auto; margin: 0; font-family: inherit; padding: 4px 6px; }
   label.field { display: block; margin-top: 14px; font-weight: 600; font-size: 14px; }
   label.field small { display: block; font-weight: 400; color: var(--muted); }
   textarea, input[type=number], input[type=text], input[type=search] {
@@ -98,7 +107,7 @@
 
 <main class="wrap">
   <h1>Clear the clutter out of Gmail.</h1>
-  <p class="lead">Finds marketing email, social media and website notifications, and mail you never opened, then lets you review everything before it goes to Trash. It runs entirely in your browser: your email never touches our servers.</p>
+  <p class="lead">Finds marketing email, social media and website notifications, and old mail you never opened, then lets you review everything before it goes to Trash. It runs entirely in your browser: your email never touches our servers.</p>
 
   <div id="setupNotice" class="notice hidden">
     This site hasn't been connected to Google yet. Add a Client ID to <code>config.js</code>, or paste one under <b>Advanced</b> in the settings.
@@ -112,7 +121,13 @@
         <label class="rule"><input type="checkbox" id="r-marketing"><span><b>Marketing &amp; promotions</b><small>Sales, newsletters, anything with promo signals</small></span></label>
         <label class="rule"><input type="checkbox" id="r-social"><span><b>Social media notifications</b><small>Facebook, Instagram, X, TikTok, LinkedIn, Reddit…</small></span></label>
         <label class="rule"><input type="checkbox" id="r-notifications"><span><b>Website notifications</b><small>Automated alerts from apps and sites</small></span></label>
-        <label class="rule"><input type="checkbox" id="r-oldUnread"><span><b>Unopened for over a year</b><small>Mail you never opened, older than 12 months</small></span></label>
+        <label class="rule"><input type="checkbox" id="r-oldUnread"><span><b>Unopened old mail</b><small>Mail you never opened, received before the date below</small></span></label>
+        <div class="dateRule" id="oldBlock">
+          <div class="dateHead"><span>Received before</span><b id="oldLabel"></b><small id="oldAgo"></small></div>
+          <input type="range" id="oldSlider" min="0" step="1" aria-label="How old unopened mail must be">
+          <div class="ends"><span>1 month ago</span><span>10 years ago</span></div>
+          <label class="exact">Or exact date <input type="date" id="oldDate"></label>
+        </div>
 
         <label class="field">Marketing strictness: <span id="thresholdLabel"></span>
           <small>Lower catches more; higher only removes obvious promotions.</small>
