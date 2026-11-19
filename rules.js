@@ -61,6 +61,10 @@
 
   // ------------------------------------------------------------ helpers ----
 
+  function formatDate(ms) {
+    return new Date(ms).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  }
+
   function headerMap(msg) {
     const out = {};
     const hs = (msg.payload && msg.payload.headers) || [];
@@ -164,7 +168,8 @@
 
   /**
    * ctx: { me, threadHasReply(threadId) -> Promise<bool>, allowlist[], socialDomains[],
-   *        threshold, nowMs, rules: {oldUnread, marketing, social, notifications} }
+   *        threshold, nowMs, oldBeforeMs (optional cutoff, epoch ms),
+   *        rules: {oldUnread, marketing, social, notifications} }
    * Returns Promise<{action: 'DELETE'|'KEEP', reason, category}>
    */
   async function decide(msg, ctx) {
@@ -177,10 +182,12 @@
 
     let flagged = null;
     let category = null;
-    const age = ctx.nowMs - Number(msg.internalDate || ctx.nowMs);
+    // Unopened mail received before the user's chosen cutoff (default: 1 year ago).
+    const cutoff = ctx.oldBeforeMs != null ? ctx.oldBeforeMs : ctx.nowMs - ONE_YEAR_MS;
+    const received = Number(msg.internalDate || ctx.nowMs);
 
-    if (rules.oldUnread && labels.has("UNREAD") && age > ONE_YEAR_MS) {
-      flagged = "Unopened for over 1 year";
+    if (rules.oldUnread && labels.has("UNREAD") && received < cutoff) {
+      flagged = "Never opened, received before " + formatDate(cutoff);
       category = "old";
     }
 
@@ -215,7 +222,7 @@
   }
 
   const api = {
-    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted,
+    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted, formatDate,
     DEFAULT_SOCIAL_DOMAINS, ONE_YEAR_MS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
