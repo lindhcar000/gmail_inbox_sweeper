@@ -195,18 +195,26 @@
     for (let attempt = 0; attempt < 6; attempt++) {
       await ensureToken();
       await takeQuota(opts.units || 5);
+      const headers = { Authorization: "Bearer " + state.token };
+      if (opts.body) headers["Content-Type"] = "application/json";
       const res = await fetch(API + path, {
         method: opts.method || "GET",
-        headers: { Authorization: "Bearer " + state.token },
+        headers,
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
       });
-      if (res.ok) return res.status === 204 ? {} : res.json();
+      if (res.ok) {
+        const text = await res.text(); // batchModify returns an empty body
+        return text ? JSON.parse(text) : {};
+      }
       if (res.status === 401) { state.token = null; continue; }
       if (res.status === 429 || res.status >= 500 || res.status === 403) {
         // 403 here is usually a per-user rate limit; back off and retry.
         await sleep(Math.min(16000, 500 * 2 ** attempt) + Math.random() * 300);
         continue;
       }
-      throw new Error("Gmail API error " + res.status);
+      const err = new Error("Gmail API error " + res.status);
+      err.status = res.status;
+      throw err;
     }
     throw new Error("Gmail is rate-limiting requests. Wait a minute and try again.");
   }
@@ -372,24 +380,54 @@
     resetTrashButton();
     state.busy = true; state.stop = false;
     toggleBusy(true);
-    let done = 0, failed = 0;
     setProgress(0);
-    await pool(targets, async (r) => {
-      try {
-        await gmail("messages/" + r.id + "/trash", { method: "POST" });
-        r.state = "TRASHED"; r.selected = false;
-      } catch (e) { failed++; throw e; }
-    }, () => {
-      done++;
-      setProgress(done / targets.length);
-      setStatus("Moving to Trash: " + done + " of " + targets.length + "…");
-    });
+    const { ok, failed } = await trashRows(targets);
     state.busy = false;
     toggleBusy(false);
-    const ok = done - failed;
     setStatus("Moved " + ok.toLocaleString() + " emails to Trash" + (failed ? " (" + failed + " failed — try again)" : "") +
       ". You can recover them from Gmail's Trash for 30 days.");
     render();
+  }
+
+  // Bulk trash: one batchModify request moves up to 1,000 emails (Gmail's limit)
+  // instead of one request per email. Falls back to per-email trashing if the
+  // bulk call is refused.
+  const BULK_SIZE = 500; // under the 1,000 cap, so the progress bar still moves
+  async function trashRows(targets) {
+    let ok = 0, failed = 0;
+    const report = () => {
+      setProgress((ok + failed) / targets.length);
+      setStatus("Moving to Trash: " + (ok + failed).toLocaleString() + " of " + targets.length.toLocaleString() + "…");
+    };
+    const mark = (r) => { r.state = "TRASHED"; r.selected = false; ok++; };
+
+    let rest = targets;
+    for (let i = 0; i < targets.length && !state.stop; i += BULK_SIZE) {
+      const chunk = targets.slice(i, i + BULK_SIZE);
+      try {
+        await gmail("messages/batchModify", {
+          method: "POST", units: 50,
+          body: { ids: chunk.map((r) => r.id), addLabelIds: ["TRASH"] },
+        });
+        chunk.forEach(mark);
+        report();
+        rest = targets.slice(i + BULK_SIZE);
+      } catch (e) {
+        console.warn("Bulk trash failed; switching to one-at-a-time", e);
+        rest = targets.slice(i);
+        break;
+      }
+    }
+
+    if (rest.length && !state.stop) {
+      await pool(rest, async (r) => {
+        try {
+          await gmail("messages/" + r.id + "/trash", { method: "POST" });
+          mark(r);
+        } catch (e) { failed++; }
+      }, report);
+    }
+    return { ok, failed };
   }
 
   function resetTrashButton() {
