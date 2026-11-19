@@ -5,7 +5,18 @@
   const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
   const STORE_KEY = "inboxSweep.settings.v1";
-  const CONCURRENCY = 8;
+  const CONCURRENCY = 20;
+  // Gmail allows 250 quota units per user per second; most calls cost 5.
+  // Staying just under the limit avoids rate-limit errors and their slow back-off.
+  const QUOTA_PER_SEC = 220;
+  // Only the headers the rules need, instead of every header on every email.
+  const HEADERS = [
+    "From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Id", "Precedence",
+    "Auto-Submitted", "X-Mailchimp-Id", "X-MC-User", "X-SG-EID", "X-SG-ID", "X-Mailgun-Sid",
+    "X-Feedback-ID", "X-CSA-Complaints", "X-Mailer-RecptId", "X-Campaign", "X-CampaignID",
+    "X-SFMC-Stack", "X-Marketo-ID", "X-Klaviyo-Id", "X-HubSpot-Id", "X-Emarsys-Id",
+  ];
+  const HEADER_QS = HEADERS.map((h) => "&metadataHeaders=" + encodeURIComponent(h)).join("");
 
   const DEFAULTS = {
     rules: { marketing: true, social: true, notifications: true, oldUnread: true },
@@ -168,9 +179,22 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Token-bucket rate limiter for Gmail's per-user quota.
+  const bucket = { units: QUOTA_PER_SEC, at: performance.now() };
+  async function takeQuota(units) {
+    for (;;) {
+      const now = performance.now();
+      bucket.units = Math.min(QUOTA_PER_SEC, bucket.units + ((now - bucket.at) / 1000) * QUOTA_PER_SEC);
+      bucket.at = now;
+      if (bucket.units >= units) { bucket.units -= units; return; }
+      await sleep(((units - bucket.units) / QUOTA_PER_SEC) * 1000);
+    }
+  }
+
   async function gmail(path, opts = {}) {
     for (let attempt = 0; attempt < 6; attempt++) {
       await ensureToken();
+      await takeQuota(opts.units || 5);
       const res = await fetch(API + path, {
         method: opts.method || "GET",
         headers: { Authorization: "Bearer " + state.token },
@@ -221,7 +245,8 @@
     if (s.rules.oldUnread) q.push("older_than:1y is:unread " + base);
     if (s.rules.marketing) q.push("(category:promotions OR unsubscribe) " + base);
     if (s.rules.social) q.push("(category:social OR from:(" + socialDomains().join(" OR ") + ")) " + base);
-    if (s.rules.notifications) q.push("(category:updates OR category:forums OR unsubscribe) " + base);
+    // "unsubscribe" is already covered by the marketing search when that rule is on.
+    if (s.rules.notifications) q.push("(category:updates OR category:forums" + (s.rules.marketing ? "" : " OR unsubscribe") + ") " + base);
     return q;
   }
 
@@ -242,27 +267,36 @@
         }
       }
 
-      const threadCache = new Map();
+      // One pass over Sent mail gives every conversation you've replied in.
+      // This replaces a separate (and costly) thread lookup for each flagged email.
+      setStatus("Finding conversations you've replied to…");
+      const repliedThreads = new Set();
+      let pageToken = "";
+      do {
+        const r = await gmail("messages?maxResults=500&q=in%3Asent" + (pageToken ? "&pageToken=" + pageToken : ""));
+        (r.messages || []).forEach((m) => repliedThreads.add(m.threadId));
+        pageToken = r.nextPageToken;
+      } while (pageToken && !state.stop);
+      if (state.stop) throw new Error("stopped before your replies were checked, so nothing was marked for deletion");
+
       const ctx = {
         me: state.me,
         nowMs: Date.now(),
         threshold: state.settings.threshold,
         rules: state.settings.rules,
-        allowlist: allowlist(),
+        // A getter, so "Always keep" clicks made mid-scan apply to emails still coming in.
+        get allowlist() { return allowlist(); },
         socialDomains: socialDomains(),
-        threadHasReply(tid) {
-          if (!threadCache.has(tid)) {
-            threadCache.set(tid, gmail("threads/" + tid + "?format=minimal").then((t) =>
-              (t.messages || []).some((m) => (m.labelIds || []).includes("SENT"))));
-          }
-          return threadCache.get(tid);
-        },
+        threadHasReply: async (tid) => repliedThreads.has(tid),
       };
 
       let done = 0;
+      const started = performance.now();
+      let lastPaint = 0;
+      $("results").classList.remove("hidden");
       setStatus("Checking " + ids.length.toLocaleString() + " emails…");
       await pool(ids, async (id) => {
-        const msg = await gmail("messages/" + id + "?format=metadata");
+        const msg = await gmail("messages/" + id + "?format=metadata" + HEADER_QS);
         const d = await Rules.decide(msg, ctx);
         const h = Rules.headerMap(msg);
         state.rows.push({
@@ -273,7 +307,17 @@
       }, () => {
         done++;
         setProgress(done / ids.length);
-        if (done % 25 === 0) setStatus("Checked " + done.toLocaleString() + " of " + ids.length.toLocaleString() + " emails…");
+        const now = performance.now();
+        if (now - lastPaint > 1000 || done === ids.length) {
+          // Show results as they arrive so you can start reviewing right away.
+          lastPaint = now;
+          const perSec = done / ((now - started) / 1000);
+          const left = Math.max(0, Math.round((ids.length - done) / perSec));
+          setStatus("Checked " + done.toLocaleString() + " of " + ids.length.toLocaleString() +
+            " emails (about " + (left > 90 ? Math.round(left / 60) + " min" : left + " sec") + " left). You can start reviewing below.");
+          state.rows.sort((a, b) => b.date - a.date);
+          render();
+        }
       });
 
       state.rows.sort((a, b) => b.date - a.date);
