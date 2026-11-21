@@ -5,13 +5,14 @@
   const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
   const STORE_KEY = "inboxSweep.settings.v1";
+  const UNSUB_KEY = "inboxSweep.unsubscribed.v1"; // { sender: { at, method } }
   const CONCURRENCY = 20;
   // Gmail allows 250 quota units per user per second; most calls cost 5.
   // Staying just under the limit avoids rate-limit errors and their slow back-off.
   const QUOTA_PER_SEC = 220;
   // Only the headers the rules need, instead of every header on every email.
   const HEADERS = [
-    "From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Id", "Precedence",
+    "From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "List-Unsubscribe-Post", "List-Id", "Precedence",
     "Auto-Submitted", "X-Mailchimp-Id", "X-MC-User", "X-SG-EID", "X-SG-ID", "X-Mailgun-Sid",
     "X-Feedback-ID", "X-CSA-Complaints", "X-Mailer-RecptId", "X-Campaign", "X-CampaignID",
     "X-SFMC-Stack", "X-Marketo-ID", "X-Klaviyo-Id", "X-HubSpot-Id", "X-Emarsys-Id",
@@ -37,6 +38,7 @@
     settings: loadSettings(),
     token: null, tokenExpiry: 0, tokenClient: null, pendingToken: null,
     me: "", rows: [], tab: "DELETE", filter: "", stop: false, busy: false, confirmTimer: null,
+    unsubscribed: loadUnsubscribed(), unsubArmed: null, unsubTimer: null, unsubBusy: new Set(),
   };
 
   // ------------------------------------------------------------- settings --
@@ -47,6 +49,18 @@
       if (saved) return { ...DEFAULTS, ...saved, rules: { ...DEFAULTS.rules, ...(saved.rules || {}) } };
     } catch (e) { /* storage unavailable */ }
     return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+
+  function loadUnsubscribed() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(UNSUB_KEY) || "null");
+      if (saved && typeof saved === "object") return saved;
+    } catch (e) { /* storage unavailable */ }
+    return {};
+  }
+
+  function saveUnsubscribed() {
+    try { localStorage.setItem(UNSUB_KEY, JSON.stringify(state.unsubscribed)); } catch (e) { /* ignore */ }
   }
 
   function saveSettings() {
@@ -377,6 +391,7 @@
           id, from: h.from || "", sender: Rules.senderOf(h), subject: h.subject || "(no subject)",
           date: Number(msg.internalDate), state: d.action, reason: d.reason, category: d.category,
           selected: d.action === "DELETE",
+          unsub: Rules.parseUnsubscribe(h["list-unsubscribe"], h["list-unsubscribe-post"]),
         });
       }, () => {
         done++;
@@ -502,6 +517,122 @@
     btn.textContent = "Move selected to Trash";
   }
 
+  // ---------------------------------------------------------- unsubscribe --
+  // Options come only from the List-Unsubscribe header (https: and mailto: only,
+  // see Rules.parseUnsubscribe). Preference: RFC 8058 one-click POST, then an
+  // unsubscribe email sent from your Gmail, then opening the sender's page.
+
+  function unsubMethod(u) {
+    if (u.oneClick) return "oneclick";
+    if (u.mailto) return "mailto";
+    return "page";
+  }
+
+  const UNSUB_HINT = {
+    oneclick: "Sends the sender's one-click unsubscribe request",
+    mailto: "Sends an unsubscribe email from your Gmail to ",
+    page: "Opens the sender's unsubscribe page in a new tab",
+  };
+
+  function unsubscribeClick(r) {
+    const sender = r.sender;
+    if (state.unsubArmed !== sender) {
+      // First click arms the button; a second click within 5 seconds confirms.
+      state.unsubArmed = sender;
+      clearTimeout(state.unsubTimer);
+      state.unsubTimer = setTimeout(() => { state.unsubArmed = null; render(); }, 5000);
+      render();
+      return;
+    }
+    clearTimeout(state.unsubTimer);
+    state.unsubArmed = null;
+    unsubscribe(r);
+  }
+
+  async function unsubscribe(r) {
+    const u = r.unsub, sender = r.sender, method = unsubMethod(u);
+    if (method === "page") {
+      // Opening a page changes nothing by itself; the user finishes on the sender's site.
+      window.open(u.https, "_blank", "noopener,noreferrer");
+      setStatus("Opened " + sender + "'s unsubscribe page in a new tab. Finish unsubscribing there.");
+      render();
+      return;
+    }
+    state.unsubBusy.add(sender);
+    render();
+    try {
+      if (method === "oneclick") {
+        // RFC 8058: a POST with this exact body. no-cors means we can't read the
+        // response, so success is "the request was delivered", not confirmed.
+        await fetch(u.https, {
+          method: "POST",
+          mode: "no-cors",
+          credentials: "omit",
+          referrerPolicy: "no-referrer",
+          body: new URLSearchParams({ "List-Unsubscribe": "One-Click" }),
+        });
+      } else {
+        await gmail("messages/send", { method: "POST", units: 100, body: { raw: unsubEmail(u.mailto) } });
+      }
+      state.unsubscribed[sender] = { at: Date.now(), method };
+      saveUnsubscribed();
+      setStatus(method === "oneclick"
+        ? "Unsubscribe request sent to " + sender + ". Senders can take a few days to stop."
+        : "Unsubscribe email sent to " + u.mailto.to + " (it's in your Sent folder). Senders can take a few days to stop.");
+    } catch (e) {
+      console.warn("Unsubscribe failed", e);
+      setStatus("Couldn't unsubscribe from " + sender + ": " + e.message +
+        (u.https ? ". Try again, or open their unsubscribe page." : ". Try again."));
+      // If one-click failed (network or blocked), the next try falls back to email or the page.
+      if (method === "oneclick") r.unsub = { ...u, oneClick: false };
+    } finally {
+      state.unsubBusy.delete(sender);
+      render();
+    }
+  }
+
+  // A minimal RFC 2822 message, base64url-encoded for messages.send.
+  // Gmail fills in From. Header values were already stripped of line breaks.
+  function unsubEmail(m) {
+    const b64 = (str) => {
+      const bytes = new TextEncoder().encode(str);
+      let bin = "";
+      bytes.forEach((b) => (bin += String.fromCharCode(b)));
+      return btoa(bin);
+    };
+    const subject = /^[\x20-\x7e]*$/.test(m.subject) ? m.subject : "=?UTF-8?B?" + b64(m.subject) + "?=";
+    const msg = [
+      "To: " + m.to,
+      "Subject: " + subject,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      b64(m.body),
+    ].join("\r\n");
+    return b64(msg).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function unsubCell(r) {
+    if (!r.unsub || !r.sender) return null;
+    if (state.unsubscribed[r.sender]) {
+      return el("span", { className: "done", textContent: "Unsubscribed",
+        title: "Unsubscribed on " + new Date(state.unsubscribed[r.sender].at).toLocaleDateString() });
+    }
+    const method = unsubMethod(r.unsub);
+    const busy = state.unsubBusy.has(r.sender);
+    const armed = state.unsubArmed === r.sender;
+    const b = el("button", {
+      className: "small" + (armed ? " armed" : ""),
+      disabled: busy,
+      textContent: busy ? "Unsubscribing…" : armed ? (method === "page" ? "Click to open page" : "Click to confirm") :
+        method === "page" ? "Unsubscribe ↗" : "Unsubscribe",
+      title: UNSUB_HINT[method] + (method === "mailto" ? r.unsub.mailto.to : ""),
+    });
+    b.addEventListener("click", () => unsubscribeClick(r));
+    return b;
+  }
+
   // ------------------------------------------------------------- render ----
 
   function setStatus(t) { $("status").textContent = t; }
@@ -560,12 +691,14 @@
       } else {
         reason.append(r.reason);
       }
-      const action = el("td");
+      const action = el("td", { className: "actions" });
       if (r.state === "DELETE" && r.sender) {
         const b = el("button", { className: "small", textContent: "Always keep", title: "Add " + r.sender + " to your keep list" });
         b.addEventListener("click", () => keepSender(r.sender));
         action.append(b);
       }
+      const unsub = unsubCell(r);
+      if (unsub) action.append(unsub);
       return el("tr", { className: r.state === "TRASHED" ? "trashed" : "" }, [
         el("td", null, [cb]),
         el("td", { className: "from", textContent: r.from, title: r.from }),

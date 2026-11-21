@@ -13,7 +13,7 @@
 <body>
 <p><a href="./">← Back to Inbox Sweep</a></p>
 <h1>Privacy policy</h1>
-<p><em>Last updated: November 18, 2026</em></p>
+<p><em>Last updated: November 21, 2026</em></p>
 
 <p>Inbox Sweep is a web app that helps you find and trash unwanted email in your Gmail account. This policy explains what data it uses and what it does with it.</p>
 
@@ -22,9 +22,19 @@
 <ul>
   <li>read email headers (sender, recipients, subject, date), Gmail labels and the short preview text, in order to decide which emails match the rules you chose;</li>
   <li>check whether you have replied in a conversation, so those conversations are never deleted;</li>
-  <li>move the emails you select to Gmail's Trash.</li>
+  <li>move the emails you select to Gmail's Trash;</li>
+  <li>unsubscribe you from a mailing list, only when you click <b>Unsubscribe</b> and confirm (see below).</li>
 </ul>
-<p>The app never reads full message bodies or attachments, never sends email, and never permanently deletes anything. Emails moved to Trash can be recovered in Gmail for 30 days.</p>
+<p>The app never reads full message bodies or attachments, never sends email except the unsubscribe requests you confirm, and never permanently deletes anything. Emails moved to Trash can be recovered in Gmail for 30 days.</p>
+
+<h2>Unsubscribing</h2>
+<p>Marketing emails usually include a standard <code>List-Unsubscribe</code> header that names the sender's own unsubscribe web address or email address. When you click <b>Unsubscribe</b> and confirm, the app uses that header in one of these ways:</p>
+<ul>
+  <li><b>One-click request:</b> your browser sends the sender's standard one-click unsubscribe request (RFC 8058) to the web address in the header. The request contains only the text <code>List-Unsubscribe=One-Click</code>, plus whatever the sender put in their own address. No cookies or other email data are sent.</li>
+  <li><b>Unsubscribe email:</b> the app sends a short email from your Gmail account to the address in the header, using the subject and text the sender asked for (usually just "unsubscribe"). It appears in your Sent folder.</li>
+  <li><b>Unsubscribe page:</b> the app opens the sender's unsubscribe page in a new tab, and you finish there.</li>
+</ul>
+<p>Only secure <code>https:</code> web addresses and <code>mailto:</code> email addresses are used. A list of senders you've unsubscribed from is kept in your browser's local storage so the app can show "Unsubscribed" next to them.</p>
 
 <h2>Where your data goes</h2>
 <p>Everything happens inside your own web browser. Your browser talks directly to Google's Gmail API. <strong>No email data is sent to, stored on, or shared with any server operated by Inbox Sweep or any third party.</strong> There is no Inbox Sweep server.</p>

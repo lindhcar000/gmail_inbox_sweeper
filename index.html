@@ -85,6 +85,11 @@
   td.reason { color: var(--muted); font-size: 13px; }
   td.date { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
   tr.trashed td { opacity: .45; text-decoration: line-through; }
+  tr.trashed td.actions { opacity: 1; text-decoration: none; }
+  td.actions { white-space: nowrap; }
+  td.actions > * + * { margin-left: 6px; }
+  td.actions .done { color: var(--muted); font-size: 13px; }
+  button.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--soft); color: var(--accent); margin-right: 4px; }
   .tablewrap { max-height: 620px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
@@ -206,7 +211,7 @@
           <span class="spacer"></span>
           <button id="trash" class="danger" disabled>Move selected to Trash</button>
         </div>
-        <p class="status">Trashed email can be recovered from Gmail's Trash for 30 days.</p>
+        <p class="status">Trashed email can be recovered from Gmail's Trash for 30 days. <b>Unsubscribe</b> (click twice) asks the sender to stop mailing you, using the unsubscribe link or address they included in the email.</p>
       </div>
     </section>
   </div>
