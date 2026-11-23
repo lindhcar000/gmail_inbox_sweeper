@@ -74,7 +74,10 @@ const many = (k, f) => Array.from({ length: k }, f);
 
   check("unsafe sender is not searched", Sweep.senderQuery("a@x.com)", "") === null && Sweep.senderQuery("", "") === null);
   for (const s of ["Your receipt", "Order confirmation", "Your order has shipped", "Invoice", "Payment due", "Verify your email", "Security alert",
-    "New sign-in", "New login", "Unusual activity", "Confirm your account", "Your bill is ready", "Interview", "Thank you for applying", "Application update"])
+    "New sign-in", "New login", "Unusual activity", "Confirm your account", "Your bill is ready", "Interview", "Thank you for applying", "Application update",
+    ...["Your receipts", "Invoices for May", "Your statements are available", "Payment failed", "Payment declined",
+    "Your payment was received", "Refund issued", "Your bill for June", "Tax document available", "Your 1099 is ready",
+    "Security notice", "Flight confirmation", "Your W-2 is available", "Booking confirmed"]])
     check("protected terms cover: " + s, Sweep.PROTECTED_TERMS.some((t) => new RegExp("\\b" + t + "\\b", "i").test(s)));
 
   console.log(`\n${total - fail}/${total} passed`);

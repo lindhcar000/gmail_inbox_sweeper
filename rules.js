@@ -18,13 +18,14 @@
   ];
 
   const TRANSACTIONAL_RE = new RegExp(
-    "\\b(receipt|order (confirmation|#|number|has shipped)|your order|shipped|" +
-    "delivery|tracking|invoice|statement|payment (received|due|confirmation)|" +
-    "password|verification code|verify your|security alert|sign-?in attempt|" +
+    "\\b(receipts?|order (confirmation|#|number|has shipped)|your order|shipped|" +
+    "delivery|tracking|invoices?|statements?|payments?|refund(s|ed)?|" +
+    "passwords?|verification code|verify your|security (alert|notice|notification|warning|code|update)s?|sign-?in attempt|" +
     "new (login|sign-?in)|login attempt|unusual activity|two-factor|2fa|" +
-    "confirm your (email|account)|2-step|one-time code|appointment|reservation|" +
-    "itinerary|boarding pass|bill is ready|payment due|autopay|" +
-    "interview|offer letter|your application|thank you for applying|" +
+    "confirm your (email|account)|2-step|one-time code|appointments?|reservations?|" +
+    "itinerary|boarding pass(es)?|(flight|booking) (confirmation|confirmed|change|changed|cancell?ed|delayed|update)|" +
+    "bills?|autopay|tax (document|form|return|statement|notice)s?|1099|1098|w-2|" +
+    "interviews?|offer letter|your application|thank you for applying|" +
     "application (received|status|update))\\b",
     "i"
   );
@@ -180,6 +181,11 @@
     const rules = ctx.rules || {};
     const social = ctx.socialDomains || DEFAULT_SOCIAL_DOMAINS;
 
+    // Before every rule, so no rule (including old unopened mail) can flag these.
+    if (TRANSACTIONAL_RE.test(subject)) {
+      return { action: "KEEP", reason: "Receipt, bill, security or application email", category: null };
+    }
+
     let flagged = null;
     let category = null;
     // Unopened mail received before the user's chosen cutoff (default: 1 year ago).
@@ -189,10 +195,6 @@
     if (rules.oldUnread && labels.has("UNREAD") && received < cutoff) {
       flagged = "Never opened, received before " + formatDate(cutoff);
       category = "old";
-    }
-
-    if (!flagged && (rules.marketing || rules.social || rules.notifications) && TRANSACTIONAL_RE.test(subject)) {
-      return { action: "KEEP", reason: "Receipt, bill, security or application email", category: null };
     }
 
     if (!flagged && rules.social) {

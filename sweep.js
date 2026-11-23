@@ -10,10 +10,11 @@
 
   // Broader than Rules' TRANSACTIONAL_RE on purpose: a match only means "check it individually".
   const PROTECTED_TERMS = [
-    "receipt", "order", "orders", "shipped", "delivery", "tracking", "invoice", "statement", "payment",
-    "password", "verification", "verify", "security", "sign-in", "signin", "login", "unusual activity",
-    "two-factor", "2fa", "confirm", "2-step", "one-time code", "appointment", "reservation", "itinerary",
-    "boarding pass", "bill", "autopay", "interview", "offer letter", "application", "applying",
+    "receipt", "receipts", "order", "orders", "shipped", "delivery", "tracking", "invoice", "invoices", "statement", "statements",
+    "payment", "payments", "refund", "refunds", "refunded", "tax", "1099", "1098", "w-2", "flight", "booking",
+    "password", "passwords", "verification", "verify", "security", "sign-in", "signin", "login", "unusual activity",
+    "two-factor", "2fa", "confirm", "2-step", "one-time code", "appointment", "appointments", "reservation", "reservations", "itinerary",
+    "boarding pass", "boarding passes", "bill", "bills", "autopay", "interview", "interviews", "offer letter", "application", "applying",
   ];
 
   function protectedQuery(base) {

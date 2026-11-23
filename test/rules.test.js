@@ -41,6 +41,18 @@ const cases = [
   ["no-reply, no machine signal", "KEEP", msg("noreply@dentist.com", { subject: "See you next week" })],
   ["bank statement", "KEEP", msg("alerts@chase.com", { subject: "Your statement is ready", labels: ["CATEGORY_UPDATES"] })],
   ["utility bill", "KEEP", msg("noreply@eversource.com", { subject: "Your bill is ready", labels: ["CATEGORY_UPDATES"] })],
+  ["old unread statement", "KEEP", msg("alerts@chase.com", { subject: "Your statement is ready", labels: ["UNREAD"], headers: unsub, date: OLD })],
+  ["old unread receipt", "KEEP", msg("no-reply@shop.com", { subject: "Your receipt", labels: ["UNREAD", "CATEGORY_UPDATES"], date: OLD })],
+  ["old unread security alert", "KEEP", msg("security@site.com", { subject: "Security alert", labels: ["UNREAD"], headers: unsub, date: OLD })],
+  ["old unread application", "KEEP", msg("jobs@company.com", { subject: "Thank you for applying", labels: ["UNREAD"], headers: unsub, date: OLD })],
+  ["old unread bill, only old rule on", "KEEP", msg("noreply@power.com", { subject: "Your bill is ready", labels: ["UNREAD"], headers: unsub, date: OLD }), { rules: { oldUnread: true } }],
+  ["old unread newsletter", "DELETE", msg("news@brand.com", { subject: "Weekly roundup", labels: ["UNREAD"], headers: unsub, date: OLD }), { rules: { oldUnread: true } }],
+  ...["Your receipts", "Invoices for May", "Your statements are available", "Payment failed", "Payment declined",
+    "Your payment was received", "Refund issued", "Your bill for June", "Tax document available", "Your 1099 is ready",
+    "Security notice", "Flight confirmation", "Your W-2 is available", "Booking confirmed"]
+    .map((subject) => ["protected: " + subject, "KEEP", msg("alerts@b.com", { subject, labels: ["UNREAD"], headers: unsub, date: OLD })]),
+  ...["Flight deals from $49", "New arrivals", "Taxi rides 20% off", "Weekly roundup"]
+    .map((subject) => ["not protected: " + subject, "DELETE", msg("news@b.com", { subject, labels: ["UNREAD"], headers: unsub, date: OLD })]),
   ["higher threshold spares weak promo", "KEEP", msg("Brand <hello@brand.com>", { subject: "New arrivals", headers: unsub }), { threshold: 6 }],
 ];
 
