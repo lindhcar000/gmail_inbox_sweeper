@@ -79,7 +79,22 @@ const cases = [
     if (!ok) fail++;
     console.log(`${ok ? "PASS" : "FAIL"}  unsubscribe: ${name}${ok ? "" : "  got " + JSON.stringify(got)}`);
   }
-  const total = cases.length + unsubCases.length;
+  // ---- isRateLimit
+  const rateCases = [
+    ["403 quota (ErrorInfo)", 403, { error: { details: [{ reason: "RATE_LIMIT_EXCEEDED" }], errors: [{}] } }, true],
+    ["403 user rate limit", 403, { error: { errors: [{ reason: "userRateLimitExceeded" }] } }, true],
+    ["403 permissions", 403, { error: { errors: [{ reason: "insufficientPermissions" }] } }, false],
+    ["403 daily limit", 403, { error: { errors: [{ reason: "dailyLimitExceeded" }] } }, false],
+    ["403 no body", 403, null, false],
+    ["429", 429, null, true],
+    ["500", 500, null, false],
+  ];
+  for (const [name, status, body, want] of rateCases) {
+    const ok = Rules.isRateLimit(status, body) === want;
+    if (!ok) fail++;
+    console.log(`${ok ? "PASS" : "FAIL"}  rate limit: ${name}`);
+  }
+  const total = cases.length + unsubCases.length + rateCases.length;
   console.log(`\n${total - fail}/${total} passed`);
   process.exit(fail ? 1 : 0);
 })();

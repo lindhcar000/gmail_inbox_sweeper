@@ -267,8 +267,19 @@
     return { https, oneClick, mailto };
   }
 
+  // --------------------------------------------------------- API errors ----
+
+  /** True if a Gmail error means "slow down and retry", not a permission problem. */
+  function isRateLimit(status, body) {
+    if (status === 429) return true;
+    if (status !== 403) return false;
+    const err = (body && body.error) || {};
+    const reasons = [].concat(err.details || [], err.errors || []).map((d) => d && d.reason);
+    return reasons.some((r) => ["RATE_LIMIT_EXCEEDED", "rateLimitExceeded", "userRateLimitExceeded"].includes(r));
+  }
+
   const api = {
-    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted, formatDate, parseUnsubscribe,
+    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted, formatDate, parseUnsubscribe, isRateLimit, hasBulkSignals,
     DEFAULT_SOCIAL_DOMAINS, ONE_YEAR_MS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
