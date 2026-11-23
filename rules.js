@@ -221,8 +221,65 @@
     return { action: "DELETE", reason: flagged, category };
   }
 
+  // -------------------------------------------------------- unsubscribe ----
+
+  const EMAIL_RE = /^[^\s@<>,;"'()\[\]\\]+@[^\s@<>,;"'()\[\]\\]+\.[a-z0-9-]{2,}$/i;
+  const stripLines = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
+
+  function parseMailto(raw) {
+    let url;
+    try { url = new URL(raw); } catch (e) { return null; }
+    if (url.protocol !== "mailto:") return null;
+    let to;
+    try { to = decodeURIComponent(url.pathname).split(",")[0].trim(); } catch (e) { return null; }
+    if (!EMAIL_RE.test(to)) return null;
+    return {
+      to,
+      subject: stripLines(url.searchParams.get("subject")) || "unsubscribe",
+      body: String(url.searchParams.get("body") || "unsubscribe").slice(0, 2000),
+    };
+  }
+
+  /**
+   * Reads List-Unsubscribe (RFC 2369) and List-Unsubscribe-Post (RFC 8058).
+   * Only https: URLs and mailto: addresses are accepted; everything else is ignored.
+   * Returns { https, oneClick, mailto } or null if there's no usable option.
+   *   https:    the first https unsubscribe URL (string) or null
+   *   oneClick: true if the sender supports RFC 8058 one-click POST to `https`
+   *   mailto:   { to, subject, body } or null
+   */
+  function parseUnsubscribe(listUnsub, listUnsubPost) {
+    const items = String(listUnsub || "").match(/<[^<>]*>/g) || [];
+    let https = null, mailto = null;
+    for (const item of items) {
+      const raw = item.slice(1, -1).replace(/\s+/g, "");
+      if (!https && /^https:/i.test(raw)) {
+        try {
+          const u = new URL(raw);
+          if (u.protocol === "https:" && u.hostname) https = u.href;
+        } catch (e) { /* malformed */ }
+      } else if (!mailto && /^mailto:/i.test(raw)) {
+        mailto = parseMailto(raw);
+      }
+    }
+    if (!https && !mailto) return null;
+    const oneClick = !!https && /List-Unsubscribe\s*=\s*One-Click/i.test(listUnsubPost || "");
+    return { https, oneClick, mailto };
+  }
+
+  // --------------------------------------------------------- API errors ----
+
+  /** True if a Gmail error means "slow down and retry", not a permission problem. */
+  function isRateLimit(status, body) {
+    if (status === 429) return true;
+    if (status !== 403) return false;
+    const err = (body && body.error) || {};
+    const reasons = [].concat(err.details || [], err.errors || []).map((d) => d && d.reason);
+    return reasons.some((r) => ["RATE_LIMIT_EXCEEDED", "rateLimitExceeded", "userRateLimitExceeded"].includes(r));
+  }
+
   const api = {
-    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted, formatDate,
+    decide, headerMap, senderOf, cleanList, normalizeAddr, isAllowlisted, formatDate, parseUnsubscribe, isRateLimit, hasBulkSignals,
     DEFAULT_SOCIAL_DOMAINS, ONE_YEAR_MS,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;

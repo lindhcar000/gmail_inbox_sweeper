@@ -57,6 +57,44 @@ const cases = [
     if (!ok) fail++;
     console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(38)} ${r.action.padEnd(6)} ${r.reason}`);
   }
-  console.log(`\n${cases.length - fail}/${cases.length} passed`);
+
+  // ---- parseUnsubscribe
+  const P = Rules.parseUnsubscribe;
+  const unsubCases = [
+    ["one-click https + mailto", P("<mailto:u@list.com?subject=stop>, <https://x.com/u?id=1>", "List-Unsubscribe=One-Click"),
+      { https: "https://x.com/u?id=1", oneClick: true, mailto: { to: "u@list.com", subject: "stop", body: "unsubscribe" } }],
+    ["https without post header", P("<https://x.com/u>"), { https: "https://x.com/u", oneClick: false, mailto: null }],
+    ["mailto only, defaults", P("<mailto:leave@list.org>"), { https: null, oneClick: false, mailto: { to: "leave@list.org", subject: "unsubscribe", body: "unsubscribe" } }],
+    ["post header but no https", P("<mailto:a@b.com>", "List-Unsubscribe=One-Click"), { https: null, oneClick: false, mailto: { to: "a@b.com", subject: "unsubscribe", body: "unsubscribe" } }],
+    ["http rejected", P("<http://x.com/u>"), null],
+    ["javascript rejected", P("<javascript:alert(1)>"), null],
+    ["no angle brackets", P("https://x.com/u"), null],
+    ["empty", P(undefined), null],
+    ["bad mailto address", P("<mailto:not-an-address>"), null],
+    ["header injection stripped", P("<mailto:a@b.com?subject=hi%0D%0ABcc:%20x@y.com>"), { https: null, oneClick: false, mailto: { to: "a@b.com", subject: "hi Bcc: x@y.com", body: "unsubscribe" } }],
+    ["folded header whitespace", P("<https://x.com/\r\n u>"), { https: "https://x.com/u", oneClick: false, mailto: null }],
+  ];
+  for (const [name, got, want] of unsubCases) {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (!ok) fail++;
+    console.log(`${ok ? "PASS" : "FAIL"}  unsubscribe: ${name}${ok ? "" : "  got " + JSON.stringify(got)}`);
+  }
+  // ---- isRateLimit
+  const rateCases = [
+    ["403 quota (ErrorInfo)", 403, { error: { details: [{ reason: "RATE_LIMIT_EXCEEDED" }], errors: [{}] } }, true],
+    ["403 user rate limit", 403, { error: { errors: [{ reason: "userRateLimitExceeded" }] } }, true],
+    ["403 permissions", 403, { error: { errors: [{ reason: "insufficientPermissions" }] } }, false],
+    ["403 daily limit", 403, { error: { errors: [{ reason: "dailyLimitExceeded" }] } }, false],
+    ["403 no body", 403, null, false],
+    ["429", 429, null, true],
+    ["500", 500, null, false],
+  ];
+  for (const [name, status, body, want] of rateCases) {
+    const ok = Rules.isRateLimit(status, body) === want;
+    if (!ok) fail++;
+    console.log(`${ok ? "PASS" : "FAIL"}  rate limit: ${name}`);
+  }
+  const total = cases.length + unsubCases.length + rateCases.length;
+  console.log(`\n${total - fail}/${total} passed`);
   process.exit(fail ? 1 : 0);
 })();

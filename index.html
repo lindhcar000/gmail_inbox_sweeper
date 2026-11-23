@@ -73,8 +73,8 @@
   .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
   .toolbar input[type=search] { width: 180px; margin: 0; font-family: inherit; }
   td button { white-space: nowrap; }
-  .tabs { display: flex; gap: 6px; }
-  .tabs button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tabs button.on, #unsubNav button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
   .spacer { flex: 1; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); vertical-align: top; }
@@ -85,7 +85,15 @@
   td.reason { color: var(--muted); font-size: 13px; }
   td.date { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
   tr.trashed td { opacity: .45; text-decoration: line-through; }
+  tr.trashed td.actions { opacity: 1; text-decoration: none; }
+  td.actions { white-space: nowrap; }
+  td.actions > * + * { margin-left: 6px; }
+  td.actions .done { color: var(--muted); font-size: 13px; }
+  button.armed { background: var(--danger); color: #fff; border-color: var(--danger); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; background: var(--soft); color: var(--accent); margin-right: 4px; }
+  .tag.warn { background: var(--warn); color: var(--ink); }
+  td.lists { max-width: 320px; overflow-wrap: anywhere; }
+  td.lists .reason { color: var(--muted); font-size: 13px; }
   .tablewrap { max-height: 620px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
   footer { color: var(--muted); font-size: 13px; padding: 20px 0 40px; }
@@ -175,6 +183,7 @@
       <div class="toolbar">
         <button id="scan" class="primary" disabled>Scan my inbox</button>
         <button id="stop" class="hidden">Stop</button>
+        <button id="compare" class="hidden" disabled>Test sender grouping</button>
         <span class="spacer"></span>
         <button id="export" class="hidden">Download CSV</button>
       </div>
@@ -188,14 +197,24 @@
             <button data-tab="DELETE" class="on">To trash</button>
             <button data-tab="KEEP">Kept</button>
             <button data-tab="TRASHED">Trashed</button>
+            <button data-tab="UNSUB">Unsubscribe</button>
           </div>
           <input type="search" id="filter" placeholder="Filter by sender or subject">
           <span class="spacer"></span>
           <button id="selAll" class="small">Select all</button>
           <button id="selNone" class="small">Select none</button>
         </div>
+        <div class="toolbar hidden" id="unsubNav">
+          <button id="unsubTodo" class="small">To do</button>
+          <button id="unsubDone" class="small">Done</button>
+          <span class="status">Each mailing list appears once. Click Unsubscribe twice to confirm.</span>
+        </div>
         <div class="tablewrap">
-          <table>
+          <table id="unsubWrap" class="hidden">
+            <thead><tr><th>Sender</th><th>Emails</th><th id="unsubDate">Latest</th><th>How</th><th></th></tr></thead>
+            <tbody id="unsubRows"></tbody>
+          </table>
+          <table id="mailTable">
             <thead><tr><th style="width:28px"></th><th>From</th><th>Subject</th><th>Why</th><th>Date</th><th></th></tr></thead>
             <tbody id="rows"></tbody>
           </table>
@@ -206,7 +225,7 @@
           <span class="spacer"></span>
           <button id="trash" class="danger" disabled>Move selected to Trash</button>
         </div>
-        <p class="status">Trashed email can be recovered from Gmail's Trash for 30 days.</p>
+        <p class="status">Trashed email can be recovered from Gmail's Trash for 30 days. The <b>Unsubscribe</b> tab asks senders to stop mailing you, using the unsubscribe link or address they included in the email.</p>
       </div>
     </section>
   </div>
@@ -220,6 +239,8 @@
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="config.js"></script>
 <script src="rules.js"></script>
+<script src="unsub.js"></script>
+<script src="sweep.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
