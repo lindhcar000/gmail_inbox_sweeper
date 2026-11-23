@@ -39,7 +39,7 @@ A website that cleans up Gmail. It finds marketing email, social media notificat
 Open your site, click **Sign in with Google**, choose your rules and click **Scan my inbox**. Review the "To trash" list:
 - Untick anything you want to keep.
 - Click **Always keep** to protect a sender forever.
-- Click **Unsubscribe** (twice, to confirm) to stop a sender from mailing you. It uses the sender's own unsubscribe option from the email's `List-Unsubscribe` header: a one-click request if they support it, otherwise an unsubscribe email from your Gmail, otherwise their unsubscribe page in a new tab.
+- Open the **Unsubscribe** tab, where each mailing list appears once, and click **Unsubscribe** (twice, to confirm) to stop a sender from mailing you. Lists you've finished move to **Done**, and come back if they're still emailing you more than 10 days later. It uses the sender's own unsubscribe option from the email's `List-Unsubscribe` header: a one-click request if they support it, otherwise an unsubscribe email from your Gmail, otherwise their unsubscribe page in a new tab.
 
 Then click **Move selected to Trash** (it asks you to click twice). You can recover trashed email from Gmail's Trash for 30 days.
 

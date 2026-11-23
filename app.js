@@ -5,7 +5,7 @@
   const SCOPE = "https://www.googleapis.com/auth/gmail.modify";
   const API = "https://gmail.googleapis.com/gmail/v1/users/me/";
   const STORE_KEY = "inboxSweep.settings.v1";
-  const UNSUB_KEY = "inboxSweep.unsubscribed.v1"; // { sender: { at, method } }
+  const UNSUB_KEY = "inboxSweep.unsubscribed.v1"; // see Unsub.parseStore
   const CONCURRENCY = 10;
   // Projects created since May 2026 get 6,000 quota units per user per minute (100/sec).
   // Start at 90% of that. Older projects may allow more, so the limiter probes upward
@@ -42,7 +42,8 @@
     settings: loadSettings(),
     token: null, tokenExpiry: 0, tokenClient: null, pendingToken: null,
     me: "", rows: [], tab: "DELETE", filter: "", stop: false, busy: false, confirmTimer: null,
-    unsubscribed: loadUnsubscribed(), unsubArmed: null, unsubTimer: null, unsubBusy: new Set(),
+    unsubStore: loadUnsubscribed(), unsubscribed: {}, unsubView: "todo", unsubOpened: new Set(),
+    unsubArmed: null, unsubTimer: null, unsubBusy: new Set(),
   };
 
   // ------------------------------------------------------------- settings --
@@ -57,14 +58,13 @@
 
   function loadUnsubscribed() {
     try {
-      const saved = JSON.parse(localStorage.getItem(UNSUB_KEY) || "null");
-      if (saved && typeof saved === "object") return saved;
+      return Unsub.parseStore(JSON.parse(localStorage.getItem(UNSUB_KEY) || "null"));
     } catch (e) { /* storage unavailable */ }
-    return {};
+    return Unsub.parseStore(null);
   }
 
   function saveUnsubscribed() {
-    try { localStorage.setItem(UNSUB_KEY, JSON.stringify(state.unsubscribed)); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(UNSUB_KEY, JSON.stringify(state.unsubStore)); } catch (e) { /* ignore */ }
   }
 
   function saveSettings() {
@@ -230,6 +230,8 @@
       await requestToken(state.me ? "" : "consent");
       const profile = await gmail("profile", { units: COST.profile });
       state.me = profile.emailAddress;
+      state.unsubscribed = Unsub.openAccount(state.unsubStore, state.me.toLowerCase());
+      saveUnsubscribed();
       $("who").textContent = state.me + " · ";
       $("signin").classList.add("hidden");
       $("signout").classList.remove("hidden");
@@ -243,6 +245,7 @@
   function signOut() {
     if (state.token && window.google) google.accounts.oauth2.revoke(state.token, () => {});
     state.token = null; state.me = ""; state.rows = [];
+    state.unsubscribed = {}; state.unsubOpened.clear(); state.unsubArmed = null;
     $("who").textContent = "";
     $("signin").classList.remove("hidden");
     $("signout").classList.add("hidden");
@@ -460,6 +463,7 @@
           id, from: h.from || "", sender: Rules.senderOf(h), subject: h.subject || "(no subject)",
           date: Number(msg.internalDate), state: d.action, reason: d.reason, category: d.category,
           selected: d.action === "DELETE",
+          listId: Unsub.listIdOf(h["list-id"]),
           unsub: Rules.parseUnsubscribe(h["list-unsubscribe"], h["list-unsubscribe-post"]),
         });
       };
@@ -690,11 +694,10 @@
     page: "Opens the sender's unsubscribe page in a new tab",
   };
 
-  function unsubscribeClick(r) {
-    const sender = r.sender;
-    if (state.unsubArmed !== sender) {
+  function unsubscribeClick(g) {
+    if (state.unsubArmed !== g.key) {
       // First click arms the button; a second click within 5 seconds confirms.
-      state.unsubArmed = sender;
+      state.unsubArmed = g.key;
       clearTimeout(state.unsubTimer);
       state.unsubTimer = setTimeout(() => { state.unsubArmed = null; render(); }, 5000);
       render();
@@ -702,19 +705,26 @@
     }
     clearTimeout(state.unsubTimer);
     state.unsubArmed = null;
-    unsubscribe(r);
+    unsubscribe(g);
   }
 
-  async function unsubscribe(r) {
-    const u = r.unsub, sender = r.sender, method = unsubMethod(u);
+  function markDone(g, method, done) {
+    done[g.key] = { at: Date.now(), method, name: g.name };
+    saveUnsubscribed();
+  }
+
+  async function unsubscribe(g) {
+    const r = g.row, u = r.unsub, sender = g.sender, method = unsubMethod(u);
+    const done = state.unsubscribed; // this account's list, even if you sign out meanwhile
     if (method === "page") {
       // Opening a page changes nothing by itself; the user finishes on the sender's site.
       window.open(u.https, "_blank", "noopener,noreferrer");
-      setStatus("Opened " + sender + "'s unsubscribe page in a new tab. Finish unsubscribing there.");
+      state.unsubOpened.add(g.key);
+      setStatus("Opened " + sender + "'s unsubscribe page in a new tab. Finish there, then click Mark as done.");
       render();
       return;
     }
-    state.unsubBusy.add(sender);
+    state.unsubBusy.add(g.key);
     render();
     try {
       if (method === "oneclick") {
@@ -730,19 +740,17 @@
       } else {
         await gmail("messages/send", { method: "POST", units: COST.send, body: { raw: unsubEmail(u.mailto) } });
       }
-      state.unsubscribed[sender] = { at: Date.now(), method };
-      saveUnsubscribed();
+      markDone(g, method, done);
       setStatus(method === "oneclick"
         ? "Unsubscribe request sent to " + sender + ". Senders can take a few days to stop."
         : "Unsubscribe email sent to " + u.mailto.to + " (it's in your Sent folder). Senders can take a few days to stop.");
     } catch (e) {
       console.warn("Unsubscribe failed", e);
-      setStatus("Couldn't unsubscribe from " + sender + ": " + e.message +
-        (u.https ? ". Try again, or open their unsubscribe page." : ". Try again."));
+      setStatus("Couldn't unsubscribe from " + sender + ": " + e.message + ". Try again.");
       // If one-click failed (network or blocked), the next try falls back to email or the page.
       if (method === "oneclick") r.unsub = { ...u, oneClick: false };
     } finally {
-      state.unsubBusy.delete(sender);
+      state.unsubBusy.delete(g.key);
       render();
     }
   }
@@ -769,24 +777,63 @@
     return b64(msg).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
-  function unsubCell(r) {
-    if (!r.unsub || !r.sender) return null;
-    if (state.unsubscribed[r.sender]) {
-      return el("span", { className: "done", textContent: "Unsubscribed",
-        title: "Unsubscribed on " + new Date(state.unsubscribed[r.sender].at).toLocaleDateString() });
+  const METHOD_LABEL = { oneclick: "One-click", mailto: "Email", page: "Web page" };
+  const DONE_LABEL = { oneclick: "One-click request", mailto: "Unsubscribe email", page: "Marked as done" };
+
+  function unsubActions(g) {
+    const small = (text, onclick, title) => {
+      const b = el("button", { className: "small", textContent: text, title: title || "" });
+      b.addEventListener("click", onclick);
+      return b;
+    };
+    if (state.unsubView === "done") {
+      return [small("Move back", () => {
+        delete state.unsubscribed[g.doneKey];
+        state.unsubOpened.delete(g.key);
+        saveUnsubscribed();
+        render();
+      }, "Show this in To do again. This doesn't resubscribe you.")];
     }
-    const method = unsubMethod(r.unsub);
-    const busy = state.unsubBusy.has(r.sender);
-    const armed = state.unsubArmed === r.sender;
-    const b = el("button", {
-      className: "small" + (armed ? " armed" : ""),
-      disabled: busy,
-      textContent: busy ? "Unsubscribing…" : armed ? (method === "page" ? "Click to open page" : "Click to confirm") :
-        method === "page" ? "Unsubscribe ↗" : "Unsubscribe",
-      title: UNSUB_HINT[method] + (method === "mailto" ? r.unsub.mailto.to : ""),
-    });
-    b.addEventListener("click", () => unsubscribeClick(r));
-    return b;
+    const u = g.row.unsub, method = unsubMethod(u);
+    const busy = state.unsubBusy.has(g.key), armed = state.unsubArmed === g.key;
+    const b = small(
+      busy ? "Unsubscribing…" : armed ? (method === "page" ? "Click to open page" : "Click to confirm") :
+        method === "page" ? "Open page ↗" : "Unsubscribe",
+      () => unsubscribeClick(g),
+      UNSUB_HINT[method] + (method === "mailto" ? u.mailto.to : ""));
+    b.disabled = busy;
+    b.classList.toggle("armed", armed);
+    const out = [b];
+    if (state.unsubOpened.has(g.key)) {
+      out.push(small("Mark as done", () => { markDone(g, "page", state.unsubscribed); render(); }));
+    }
+    return out;
+  }
+
+  function renderUnsub(lists) {
+    const view = state.unsubView, f = state.filter.toLowerCase();
+    const shown = lists[view].filter((g) => !f || (g.name + " " + g.sender + " " + g.listId).toLowerCase().includes(f));
+    $("unsubTodo").textContent = "To do (" + lists.todo.length.toLocaleString() + ")";
+    $("unsubDone").textContent = "Done (" + lists.done.length.toLocaleString() + ")";
+    $("unsubTodo").classList.toggle("on", view === "todo");
+    $("unsubDone").classList.toggle("on", view === "done");
+    $("unsubRows").replaceChildren(...shown.map((g) => {
+      const who = el("td", { className: "lists" }, [
+        el("b", { textContent: g.name }),
+        el("div", { className: "reason", textContent: g.sender + (g.multi && g.listId ? " · list: " + g.listId : "") }),
+      ]);
+      if (g.still) who.append(el("span", { className: "tag warn", textContent: "Still emailing you" }));
+      if (g.keeps) who.append(el("span", { className: "tag", textContent: "Also sends mail you keep" }));
+      return el("tr", null, [
+        who,
+        el("td", { textContent: g.count.toLocaleString() }),
+        el("td", { className: "date", textContent: view === "done" ? new Date(g.entry.at).toLocaleDateString() : new Date(g.latest).toLocaleDateString() }),
+        el("td", { className: "reason", textContent: view === "done" ? DONE_LABEL[g.entry.method] || "" : METHOD_LABEL[unsubMethod(g.row.unsub)] }),
+        el("td", { className: "actions" }, unsubActions(g)),
+      ]);
+    }));
+    $("unsubDate").textContent = view === "done" ? "Done on" : "Latest";
+    return shown.length;
   }
 
   // ------------------------------------------------------------- render ----
@@ -828,9 +875,11 @@
     ];
     $("stats").replaceChildren(...stats.map(([n, l]) => el("div", { className: "stat" }, [el("b", { textContent: n.toLocaleString() }), el("span", { textContent: l })])));
 
+    const lists = Unsub.groupLists(rows, state.unsubscribed);
+    const unsubTab = state.tab === "UNSUB";
     document.querySelectorAll(".tabs button").forEach((b) => {
-      const n = rows.filter((r) => r.state === b.dataset.tab).length;
-      b.textContent = { DELETE: "To trash", KEEP: "Kept", TRASHED: "Trashed" }[b.dataset.tab] + " (" + n.toLocaleString() + ")";
+      const n = b.dataset.tab === "UNSUB" ? lists.todo.length : rows.filter((r) => r.state === b.dataset.tab).length;
+      b.textContent = { DELETE: "To trash", KEEP: "Kept", TRASHED: "Trashed", UNSUB: "Unsubscribe" }[b.dataset.tab] + " (" + n.toLocaleString() + ")";
     });
 
     const f = state.filter.toLowerCase();
@@ -853,8 +902,6 @@
         b.addEventListener("click", () => keepSender(r.sender));
         action.append(b);
       }
-      const unsub = unsubCell(r);
-      if (unsub) action.append(unsub);
       return el("tr", { className: r.state === "TRASHED" ? "trashed" : "" }, [
         el("td", null, [cb]),
         el("td", { className: "from", textContent: r.from, title: r.from }),
@@ -865,7 +912,11 @@
       ]);
     }));
     const empty = $("empty");
-    empty.classList.toggle("hidden", shown.length > 0);
+    const visible = unsubTab ? renderUnsub(lists) : shown.length;
+    $("unsubWrap").classList.toggle("hidden", !unsubTab);
+    $("unsubNav").classList.toggle("hidden", !unsubTab);
+    $("mailTable").classList.toggle("hidden", unsubTab);
+    empty.classList.toggle("hidden", visible > 0);
     if (shown.length > LIMIT) {
       body.append(el("tr", null, [el("td", { colSpan: 6, className: "reason", textContent:
         "Showing the first " + LIMIT.toLocaleString() + " of " + shown.length.toLocaleString() + ". Selection and trashing still apply to all of them." })]));
@@ -911,6 +962,9 @@
   $("stop").addEventListener("click", () => { state.stop = true; setStatus("Stopping…"); });
   $("trash").addEventListener("click", trashSelected);
   $("export").addEventListener("click", exportCsv);
+  for (const [id, view] of [["unsubTodo", "todo"], ["unsubDone", "done"]]) {
+    $(id).addEventListener("click", () => { state.unsubView = view; render(); });
+  }
   $("selAll").addEventListener("click", () => setSelection(true));
   $("selNone").addEventListener("click", () => setSelection(false));
   $("filter").addEventListener("input", (e) => { state.filter = e.target.value; render(); });
